@@ -6,6 +6,7 @@
 #define __BRAINSCommonLib_h
 
 #include <itkConfigure.h>
+#include <string>
 
 #if defined(WIN32) && !defined(BRAINSCommonLib_STATIC)
 #pragma warning ( disable : 4275 )
@@ -24,5 +25,7 @@
 #cmakedefine USE_ANTS
 
 extern void BRAINSRegisterAlternateIO(void);
+
+extern void FFTWInit(const std::string path_for_wisdom);
 
 #endif // __BRAINSCommonLib_h

@@ -47,7 +47,6 @@
 #include "itkResampleImageFilter.h"
 #include "itkAffineTransform.h"
 #include "itkDisplacementFieldTransform.h"
-#include "itkImageMaskSpatialObject.h"
 
 #include "itkFindCenterOfBrainFilter.h"
 
@@ -60,6 +59,8 @@
 #endif
 #include "BRAINSFitUtils.h"
 
+#include "BRAINSTypes.h"
+
 #include "ConvertToRigidAffine.h"
 #include "genericRegistrationHelper.h"
 #include "ReadMask.h"
@@ -67,8 +68,7 @@
 #include "GenericTransformImage.h"
 #include "BRAINSCommonLibWin32Header.h"
 
-typedef itk::SpatialObject<3>      SpatialObjectType;
-typedef SpatialObjectType::Pointer ImageMaskPointer;
+
 
 namespace itk
 {
@@ -276,14 +276,13 @@ protected:
   /** instantiate and call the Registration Helper */
   template <class TransformType,
             class OptimizerType,
-            class MetricType>
+            class FitCommonCodeMetricType>
   void FitCommonCode(int numberOfIterations,
                      double minimumStepLength,
                      typename CompositeTransformType::Pointer & initialITKTransform);
 private:
 
-  BRAINSFitHelperTemplate(const Self &); // purposely not implemented
-  void operator=(const Self &);          // purposely not implemented
+  ITK_DISALLOW_COPY_AND_ASSIGN(BRAINSFitHelperTemplate);
 
   FixedImagePointer  m_FixedVolume;
   FixedImagePointer  m_FixedVolume2; // For multi-modal SyN

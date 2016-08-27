@@ -43,6 +43,7 @@ macro(FindITKUtil ITK_VAR_PREFIX )
     ITKIOTIFF
     ITKIOTransformInsightLegacy
     ITKIOVTK
+    ITKIOMRC
     ITKIOSpatialObjects
     ITKIOTransformBase
     ITKIOHDF5

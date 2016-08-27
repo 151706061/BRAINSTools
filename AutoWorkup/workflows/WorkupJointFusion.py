@@ -18,6 +18,7 @@ from nipype.interfaces.semtools.utilities.brains import BRAINSLandmarkInitialize
 from .WorkupAtlasDustCleanup import CreateDustCleanupWorkflow
 
 from utilities.misc import CommonANTsRegistrationSettings
+from .WorkupComputeLabelVolume import *
 
 # HACK Remove due to bugs from nipype.interfaces.semtools import BRAINSSnapShotWriter
 
@@ -106,6 +107,7 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
                                                              'subj_t2_image', #Desired image to create label map for
                                                              'subj_lmks', #The landmarks corresponding to t1_image
                                                              'subj_fixed_head_labels', #The fixed head labels from BABC
+                                                             'subj_posteriors', #The BABC posteriors
                                                              'subj_left_hemisphere', #The warped left hemisphere mask
                                                              'atlasWeightFilename',  #The static weights file name
                                                              'labelBaseFilename' #Atlas label base name ex) neuro_lbls.nii.gz
@@ -115,15 +117,18 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
     outputsSpec = pe.Node(interface=IdentityInterface(fields=['JointFusion_HDAtlas20_2015_label',
                                                        'JointFusion_HDAtlas20_2015_CSFVBInjected_label',
                                                        'JointFusion_HDAtlas20_2015_fs_standard_label',
-                                                       'JointFusion_HDAtlas20_2015_lobar_label',
+                                                       'JointFusion_HDAtlas20_2015_lobe_label',
                                                        'JointFusion_extended_snapshot',
-                                                       'JointFusion_HDAtlas20_2015_dustCleaned_label']),
+                                                       'JointFusion_HDAtlas20_2015_dustCleaned_label',
+                                                       'JointFusion_volumes_csv',
+                                                       'JointFusion_volumes_json',
+                                                       'JointFusion_lobe_volumes_csv',
+                                                       'JointFusion_lobe_volumes_json']),
                           run_without_submitting=True,
                           name='outputspec')
 
     BLICreator = dict()
     A2SantsRegistrationPreJointFusion_SyN = dict()
-    fixedROIAuto = dict()
     movingROIAuto = dict()
     labelMapResample = dict()
     NewlabelMapResample = dict()
@@ -134,8 +139,8 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
     multimodal ants registration if t2 exists
     """
     sessionMakeMultimodalInput = pe.Node(Function(function=MakeVector,
-                                                                      input_names=['inFN1', 'inFN2', 'jointFusion'],
-                                                                      output_names=['outFNs']),
+                                         input_names=['inFN1', 'inFN2', 'jointFusion'],
+                                         output_names=['outFNs']),
                                 run_without_submitting=True, name="sessionMakeMultimodalInput")
     sessionMakeMultimodalInput.inputs.jointFusion = False
     JointFusionWF.connect(inputsSpec, 'subj_t1_image', sessionMakeMultimodalInput, 'inFN1')
@@ -174,17 +179,31 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
     t2Resample = dict()
     warpedAtlasLblMergeNode = pe.Node(interface=Merge(number_of_atlas_sources),name="LblMergeAtlas")
     NewwarpedAtlasLblMergeNode = pe.Node(interface=Merge(number_of_atlas_sources),name="fswmLblMergeAtlas")
-    warpedAtlasesMergeNode = pe.Node(interface=Merge(number_of_atlas_sources*n_modality),name="MergeAtlases")
+    # "HACK NOT to use T2 for JointFusion only"
+    #warpedAtlasesMergeNode = pe.Node(interface=Merge(number_of_atlas_sources*n_modality),name="MergeAtlases")
+    warpedAtlasesMergeNode = pe.Node(interface=Merge(number_of_atlas_sources*1),name="MergeAtlases")
+
+    ## if using Registration masking, then do ROIAuto on fixed and moving images and connect to registraitons
+    UseRegistrationMasking = True
+    if UseRegistrationMasking == True:
+       from nipype.interfaces.semtools.segmentation.specialized import BRAINSROIAuto
+
+       fixedROIAuto = pe.Node(interface=BRAINSROIAuto(), name="fixedROIAUTOMask")
+       fixedROIAuto.inputs.ROIAutoDilateSize=10
+       fixedROIAuto.inputs.outputROIMaskVolume = "fixedImageROIAutoMask.nii.gz"
+       JointFusionWF.connect(inputsSpec, 'subj_t1_image',fixedROIAuto,'inputVolume')
+
 
     for jointFusion_atlas_subject in list(jointFusionAtlasDict.keys()):
         ## Need DataGrabber Here For the Atlas
         jointFusionAtlases[jointFusion_atlas_subject] = pe.Node(interface = IdentityInterface(
-                                                                  fields=['t1', 't2', 'label', 'lmks']),
+                                                                  fields=['t1','t2','label','lmks','regisration_mask']),
                                                                   name='jointFusionAtlasInput'+jointFusion_atlas_subject)
         jointFusionAtlases[jointFusion_atlas_subject].inputs.t1 = jointFusionAtlasDict[jointFusion_atlas_subject]['t1']
         jointFusionAtlases[jointFusion_atlas_subject].inputs.t2 = jointFusionAtlasDict[jointFusion_atlas_subject]['t2']
         jointFusionAtlases[jointFusion_atlas_subject].inputs.label = jointFusionAtlasDict[jointFusion_atlas_subject]['label']
         jointFusionAtlases[jointFusion_atlas_subject].inputs.lmks = jointFusionAtlasDict[jointFusion_atlas_subject]['lmks']
+        jointFusionAtlases[jointFusion_atlas_subject].inputs.regisration_mask = jointFusionAtlasDict[jointFusion_atlas_subject]['regisration_mask']
         ## Create BLI first
         ########################################################
         # Run BLI atlas_to_subject
@@ -202,9 +221,9 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
         many_cpu_ANTsSyN_options_dictionary = {'qsub_args': modify_qsub_args(CLUSTER_QUEUE_LONG,4,2,16), 'overwrite': True}
         A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject].plugin_args = many_cpu_ANTsSyN_options_dictionary
         if onlyT1:
-            JFregistrationTypeDescription="SixStageAntsRegistrationT1Only"
+            JFregistrationTypeDescription="FiveStageAntsRegistrationT1Only"
         else:
-            JFregistrationTypeDescription="SixStageAntsRegistrationMultiModal"
+            JFregistrationTypeDescription="FiveStageAntsRegistrationMultiModal"
         CommonANTsRegistrationSettings(
                       antsRegistrationNode=A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],
                       registrationTypeDescription=JFregistrationTypeDescription,
@@ -214,28 +233,20 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
                       save_state=None,                  #NO NEED FOR THIS
                       invert_initial_moving_transform=False)
 
-
         ## if using Registration masking, then do ROIAuto on fixed and moving images and connect to registraitons
-        UseRegistrationMasking = True
         if UseRegistrationMasking == True:
-            #from nipype.interfaces.semtools.segmentation.specialized import BRAINSROIAuto
+            from nipype.interfaces.semtools.segmentation.specialized import BRAINSROIAuto
+            JointFusionWF.connect(fixedROIAuto, 'outputROIMaskVolume',A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'fixed_image_mask')
+            # JointFusionWF.connect(inputsSpec, 'subj_fixed_head_labels',
+            #                       A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'fixed_image_mask')
 
-            #fixedROIAuto[jointFusion_atlas_subject] = pe.Node(interface=BRAINSROIAuto(), name="fixedROIAUTOMask_"+jointFusion_atlas_subject)
-            #fixedROIAuto[jointFusion_atlas_subject].inputs.ROIAutoDilateSize=10
-            #fixedROIAuto[jointFusion_atlas_subject].inputs.outputROIMaskVolume = "fixedImageROIAutoMask.nii.gz"
-
+            # NOTE: Moving image mask can be taken from Atlas directly so that it does not need to be read in
             #movingROIAuto[jointFusion_atlas_subject] = pe.Node(interface=BRAINSROIAuto(), name="movingROIAUTOMask_"+jointFusion_atlas_subject)
-            #fixedROIAuto[jointFusion_atlas_subject].inputs.ROIAutoDilateSize=10
+            #movingROIAuto.inputs.ROIAutoDilateSize=10
             #movingROIAuto[jointFusion_atlas_subject].inputs.outputROIMaskVolume = "movingImageROIAutoMask.nii.gz"
-
-            #JointFusionWF.connect(inputsSpec, 'subj_t1_image',fixedROIAuto[jointFusion_atlas_subject],'inputVolume')
             #JointFusionWF.connect(jointFusionAtlases[jointFusion_atlas_subject], 't1', movingROIAuto[jointFusion_atlas_subject],'inputVolume')
-
-            #JointFusionWF.connect(fixedROIAuto[jointFusion_atlas_subject], 'outputROIMaskVolume',A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'fixed_image_mask')
             #JointFusionWF.connect(movingROIAuto[jointFusion_atlas_subject], 'outputROIMaskVolume',A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'moving_image_mask')
-            JointFusionWF.connect(inputsSpec, 'subj_fixed_head_labels',
-                                  A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'fixed_image_mask')
-            JointFusionWF.connect(jointFusionAtlases[jointFusion_atlas_subject], 'label',
+            JointFusionWF.connect(jointFusionAtlases[jointFusion_atlas_subject], 'regisration_mask',
                                   A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'moving_image_mask')
 
         JointFusionWF.connect(BLICreator[jointFusion_atlas_subject],'outputTransformFilename',
@@ -251,6 +262,7 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
         atlasMakeMultimodalInput[jointFusion_atlas_subject].inputs.jointFusion = False
         JointFusionWF.connect(jointFusionAtlases[jointFusion_atlas_subject], 't1',
                               atlasMakeMultimodalInput[jointFusion_atlas_subject], 'inFN1')
+
         if not onlyT1:
             JointFusionWF.connect(jointFusionAtlases[jointFusion_atlas_subject], 't2', atlasMakeMultimodalInput[jointFusion_atlas_subject], 'inFN2')
         else:
@@ -260,8 +272,11 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
                        A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'fixed_image')
         JointFusionWF.connect(atlasMakeMultimodalInput[jointFusion_atlas_subject], 'outFNs',
                        A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'moving_image')
+        "HACK NOT to use T2 for JointFusion"
+        #JointFusionWF.connect(A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'warped_image',
+        #               warpedAtlasesMergeNode,'in'+str(merge_input_offset + jointFusion_atlas_mergeindex*n_modality) )
         JointFusionWF.connect(A2SantsRegistrationPreJointFusion_SyN[jointFusion_atlas_subject],'warped_image',
-                       warpedAtlasesMergeNode,'in'+str(merge_input_offset + jointFusion_atlas_mergeindex*n_modality) )
+                       warpedAtlasesMergeNode,'in'+str(merge_input_offset + jointFusion_atlas_mergeindex*1) )
 
         """
         Original t2 resampling
@@ -283,8 +298,9 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
                             t2Resample[jointFusion_atlas_subject],'reference_image')
             JointFusionWF.connect( jointFusionAtlases[jointFusion_atlas_subject], 't2',
                             t2Resample[jointFusion_atlas_subject],'input_image')
-            JointFusionWF.connect(t2Resample[jointFusion_atlas_subject],'output_image',
-                           warpedAtlasesMergeNode,'in'+str(merge_input_offset + jointFusion_atlas_mergeindex*n_modality+modality_index) )
+            "HACK NOT to use T2 for JointFusion only"
+            #JointFusionWF.connect(t2Resample[jointFusion_atlas_subject],'output_image',
+            #               warpedAtlasesMergeNode,'in'+str(merge_input_offset + jointFusion_atlas_mergeindex*n_modality+modality_index) )
 
         """
         Original labelmap resampling
@@ -346,35 +362,42 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
     jointFusion.inputs.search_radius=[3]
     #jointFusion.inputs.method='Joint[0.1,2]'
     jointFusion.inputs.out_label_fusion='JointFusion_HDAtlas20_2015_label.nii.gz'
-    JointFusionWF.connect(inputsSpec, 'subj_fixed_head_labels',
-                          jointFusion, 'mask_image')
+    #JointFusionWF.connect(inputsSpec, 'subj_fixed_head_labels', jointFusion, 'mask_image')
+    JointFusionWF.connect(fixedROIAuto, 'outputROIMaskVolume', jointFusion, 'mask_image')
 
-    #JointFusionWF.connect(warpedAtlasesMergeNode,'out',jointFusion,'warped_intensity_images')
-    #JointFusionWF.connect(warpedAtlasLblMergeNode,'out',jointFusion,'warped_label_images')
+    JointFusionWF.connect(warpedAtlasLblMergeNode,'out',
+                          jointFusion,'atlas_segmentation_image')
+
     AdjustMergeListNode = pe.Node(Function(function=adjustMergeList,
                                                    input_names=['allList','n_modality'],
                                                    output_names=['out']),
                                                    name="AdjustMergeListNode")
-    AdjustMergeListNode.inputs.n_modality = n_modality
+    "*** HACK JointFusion only uses T1"
+    #AdjustMergeListNode.inputs.n_modality = n_modality
+    AdjustMergeListNode.inputs.n_modality = 1
+
     JointFusionWF.connect(warpedAtlasesMergeNode,'out',AdjustMergeListNode,'allList')
     JointFusionWF.connect(AdjustMergeListNode,'out',jointFusion,'atlas_image')
-    JointFusionWF.connect(warpedAtlasLblMergeNode,'out',jointFusion,'atlas_segmentation_image')
-    #JointFusionWF.connect(inputsSpec, 'subj_t1_image',jointFusion,'target_image')
-    #AdjustTargetImageListNode = pe.Node(Function(function=adjustMergeList,
-    #                                               input_names=['allList','n_modality'],
-    #                                               output_names=['out']),
-    #                                               name="AdjustTargetImageListNode")
-    #AdjustTargetImageListNode.inputs.n_modality = n_modality
-    #JointFusionWF.connect(sessionMakeMultimodalInput, 'outFNs',AdjustTargetImageListNode,'allList')
-    #JointFusionWF.connect(AdjustTargetImageListNode, 'out',jointFusion,'target_image')
-    JointFusionWF.connect(sessionMakeMultimodalInput, 'outFNs', jointFusion,'target_image')
+
+    AdjustTargetImageListNode = pe.Node(Function(function=adjustMergeList,
+                                                   input_names=['allList','n_modality'],
+                                                   output_names=['out']),
+                                                   name="AdjustTargetImageListNode")
+    AdjustTargetImageListNode.inputs.n_modality = n_modality
+
+    "*** HACK JointFusion only uses T1"
+    """ Once JointFusion works with T2 properly,
+        delete sessionMakeListSingleModalInput and use sessionMakeMultimodalInput instead
+    """
+    sessionMakeListSingleModalInput = pe.Node(Function(function=MakeVector,
+                                         input_names=['inFN1', 'inFN2', 'jointFusion'],
+                                         output_names=['outFNs']),
+                                run_without_submitting=True, name="sessionMakeListSingleModalInput")
+    sessionMakeListSingleModalInput.inputs.jointFusion = False
+    JointFusionWF.connect(inputsSpec, 'subj_t1_image', sessionMakeListSingleModalInput, 'inFN1')
+    JointFusionWF.connect(sessionMakeListSingleModalInput, 'outFNs', jointFusion,'target_image')
+
     JointFusionWF.connect(jointFusion, 'out_label_fusion', outputsSpec,'JointFusion_HDAtlas20_2015_label')
-
-    #if onlyT1:
-    #    jointFusion.inputs.modalities=1
-    #else:
-    #    jointFusion.inputs.modalities=2
-
 
     ## We need to recode values to ensure that the labels match FreeSurer as close as possible by merging
     ## some labels together to standard FreeSurfer confenventions (i.e. for WMQL)
@@ -414,6 +437,7 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
         injectSurfaceCSFandVBIntoLabelMap = pe.Node(Function(function=FixLabelMapFromNeuromorphemetrics2012,
                                                       input_names=['fusionFN',
                                                         'FixedHeadFN',
+                                                        'posterior_dict',
                                                         'LeftHemisphereFN',
                                                         'outFN',
                                                         'OUT_DICT'],
@@ -426,6 +450,7 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
         injectSurfaceCSFandVBIntoLabelMap.inputs.OUT_DICT = FREESURFER_DICT
         JointFusionWF.connect(jointFusion, 'out_label_fusion', injectSurfaceCSFandVBIntoLabelMap, 'fusionFN')
         JointFusionWF.connect(inputsSpec, 'subj_fixed_head_labels', injectSurfaceCSFandVBIntoLabelMap, 'FixedHeadFN')
+        JointFusionWF.connect(inputsSpec, 'subj_posteriors', injectSurfaceCSFandVBIntoLabelMap, 'posterior_dict')
         JointFusionWF.connect(inputsSpec, 'subj_left_hemisphere', injectSurfaceCSFandVBIntoLabelMap, 'LeftHemisphereFN')
 
         JointFusionWF.connect(injectSurfaceCSFandVBIntoLabelMap, 'fixedFusionLabelFN',
@@ -462,18 +487,44 @@ def CreateJointFusionWorkflow(WFname, onlyT1, master_config, runFixFusionLabelMa
 #                      [('output_label_image', 'inputBinaryVolumes')])
 #                   ])
 
-    ## Lobar Pacellation by recoding
+    """
+    Compute label volumes
+    """
+    computeLabelVolumes = CreateVolumeMeasureWorkflow("LabelVolume", master_config)
+    JointFusionWF.connect( inputsSpec, 'subj_t1_image',
+                           computeLabelVolumes, 'inputspec.subj_t1_image')
+    JointFusionWF.connect( myLocalDustCleanup, 'outputspec.JointFusion_HDAtlas20_2015_dustCleaned_label',
+                           computeLabelVolumes, 'inputspec.subj_label_image')
+    JointFusionWF.connect( computeLabelVolumes, 'outputspec.csvFilename',
+                           outputsSpec, 'JointFusion_volumes_csv')
+    JointFusionWF.connect( computeLabelVolumes, 'outputspec.jsonFilename',
+                           outputsSpec, 'JointFusion_volumes_json')
+
+    ## Lobe Pacellation by recoding
     if master_config['relabel2lobes_filename'] != None:
         #print("Generate relabeled version based on {0}".format(master_config['relabel2lobes_filename']))
 
-        RECODE_LABELS_2_LobarPacellation = readRecodingList( master_config['relabel2lobes_filename'] )
+        RECODE_LABELS_2_LobePacellation = readRecodingList( master_config['relabel2lobes_filename'] )
         RecordToFSLobes = pe.Node(Function(function=RecodeLabelMap,
                                                     input_names=['InputFileName','OutputFileName','RECODE_TABLE'],
                                                     output_names=['OutputFileName']),
                                                     name="RecordToFSLobes")
-        RecordToFSLobes.inputs.RECODE_TABLE = RECODE_LABELS_2_LobarPacellation
-        RecordToFSLobes.inputs.OutputFileName = 'JointFusion_HDAtlas20_2015_lobar_label.nii.gz'
+        RecordToFSLobes.inputs.RECODE_TABLE = RECODE_LABELS_2_LobePacellation
+        RecordToFSLobes.inputs.OutputFileName = 'JointFusion_HDAtlas20_2015_lobe_label.nii.gz'
         JointFusionWF.connect(RecodeToStandardFSWM, 'OutputFileName',RecordToFSLobes,'InputFileName')
-        JointFusionWF.connect(RecordToFSLobes,'OutputFileName',outputsSpec,'JointFusion_HDAtlas20_2015_lobar_label')
+        JointFusionWF.connect(RecordToFSLobes,'OutputFileName',outputsSpec,'JointFusion_HDAtlas20_2015_lobe_label')
+
+        """
+        Compute lobe volumes
+        """
+        computeLobeVolumes = CreateVolumeMeasureWorkflow("LobeVolume", master_config)
+        JointFusionWF.connect( inputsSpec, 'subj_t1_image',
+                               computeLobeVolumes, 'inputspec.subj_t1_image')
+        JointFusionWF.connect( RecordToFSLobes, 'OutputFileName',
+                               computeLobeVolumes, 'inputspec.subj_label_image')
+        JointFusionWF.connect( computeLobeVolumes, 'outputspec.csvFilename',
+                               outputsSpec, 'JointFusion_lobe_volumes_csv')
+        JointFusionWF.connect( computeLobeVolumes, 'outputspec.jsonFilename',
+                               outputsSpec, 'JointFusion_lobe_volumes_json')
 
     return JointFusionWF

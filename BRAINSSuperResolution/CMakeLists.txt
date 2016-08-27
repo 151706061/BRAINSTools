@@ -1,0 +1,3 @@
+
+add_subdirectory(GenerateEdgeMap)
+add_subdirectory(EdgeBasedWeightedTV)

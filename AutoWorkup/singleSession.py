@@ -84,12 +84,16 @@ def _create_singleSession(dataDict, master_config, interpMode, pipeline_name):
             doDenoise = False
         else:
             doDenoise = True
+    useEMSP=False
+    if len( dataDict['EMSP']) >0:
+        useEMSP =True
     sessionWorkflow = generate_single_session_template_WF(project, subject, session, onlyT1, master_config,
                                                           phase=master_config['workflow_phase'],
                                                           interpMode=interpMode,
                                                           pipeline_name=pipeline_name,
                                                           doDenoise=doDenoise,
-                                                          badT2=dataDict['BadT2'])
+                                                          badT2=dataDict['BadT2'],
+                                                          useEMSP=useEMSP)
     sessionWorkflow.base_dir = master_config['cachedir']
 
     sessionWorkflow_inputsspec = sessionWorkflow.get_node('inputspec')
@@ -97,6 +101,8 @@ def _create_singleSession(dataDict, master_config, interpMode, pipeline_name):
     sessionWorkflow_inputsspec.inputs.T2s = dataDict['T2s']
     sessionWorkflow_inputsspec.inputs.PDs = dataDict['PDs']
     sessionWorkflow_inputsspec.inputs.FLs = dataDict['FLs']
+    if useEMSP:
+        sessionWorkflow_inputsspec.inputs.EMSP = dataDict['EMSP'][0]
     sessionWorkflow_inputsspec.inputs.OTHERs = dataDict['OTHERs']
     return sessionWorkflow
 
@@ -149,6 +155,7 @@ def createAndRun(sessions, environment, experiment, pipeline, cluster, useSentin
                 _dict['BadT2'] = True
             _dict['PDs'] = database.getFilenamesByScantype(session, ['PD-15', 'PD-30'])
             _dict['FLs'] = database.getFilenamesByScantype(session, ['FL-15', 'FL-30'])
+            _dict['EMSP'] = database.getFilenamesByScantype(session, ['EMSP'])
             _dict['OTHERs'] = database.getFilenamesByScantype(session, ['OTHER-15', 'OTHER-30'])
             sentinal_file_basedir = os.path.join(
                 master_config['resultdir'],
@@ -180,28 +187,40 @@ def createAndRun(sessions, environment, experiment, pipeline, cluster, useSentin
                     ))
 
             if 'warp_atlas_to_subject' in master_config['components']:
-                sentinal_file_list.append(os.path.join(
-                    sentinal_file_basedir,
-                    "WarpedAtlas2Subject",
-                    "rho.nii.gz"
-                ))
-                sentinal_file_list.append(os.path.join(
-                    sentinal_file_basedir,
-                    "WarpedAtlas2Subject",
-                    "left_hemisphere_wm.nii.gz"
-                ))
+                warp_atlas_file_list = [
+"hncma_atlas.nii.gz",
+"l_accumben_ProbabilityMap.nii.gz",
+"l_caudate_ProbabilityMap.nii.gz",
+"l_globus_ProbabilityMap.nii.gz",
+"l_hippocampus_ProbabilityMap.nii.gz",
+"l_putamen_ProbabilityMap.nii.gz",
+"l_thalamus_ProbabilityMap.nii.gz",
+"left_hemisphere_wm.nii.gz",
+"phi.nii.gz",
+"r_accumben_ProbabilityMap.nii.gz",
+"r_caudate_ProbabilityMap.nii.gz",
+"r_globus_ProbabilityMap.nii.gz",
+"r_hippocampus_ProbabilityMap.nii.gz",
+"r_putamen_ProbabilityMap.nii.gz",
+"r_thalamus_ProbabilityMap.nii.gz",
+"rho.nii.gz",
+"right_hemisphere_wm.nii.gz",
+"template_WMPM2_labels.nii.gz",
+"template_headregion.nii.gz",
+"template_leftHemisphere.nii.gz",
+"template_nac_labels.nii.gz",
+"template_rightHemisphere.nii.gz",
+"template_ventricles.nii.gz",
+"theta.nii.gz"
+]
+                for ff in warp_atlas_file_list:
+                  sentinal_file_list.append(os.path.join(
+                      sentinal_file_basedir,
+                      "WarpedAtlas2Subject",
+                      ff
+                  ))
 
             if 'jointfusion_2015_wholebrain' in master_config['components']:
-                sentinal_file_list.append(os.path.join(
-                    sentinal_file_basedir,
-                    "TissueClassify",
-                    "JointFusion_HDAtlas20_2015_fs_standard_label.nii.gz"
-                ))
-                sentinal_file_list.append(os.path.join(
-                    sentinal_file_basedir,
-                    "TissueClassify",
-                    "JointFusion_HDAtlas20_2015_label.nii.gz"
-                ))
                 sentinal_file_list.append(os.path.join(
                     sentinal_file_basedir,
                     "TissueClassify",
@@ -210,13 +229,14 @@ def createAndRun(sessions, environment, experiment, pipeline, cluster, useSentin
                 sentinal_file_list.append(os.path.join(
                     sentinal_file_basedir,
                     "TissueClassify",
-                    "JointFusion_HDAtlas20_2015_CSFVBInjected_label.nii.gz"
+                    "lobeVolumes_JSON.json"
                 ))
 
             if master_config['workflow_phase'] == 'atlas-based-reference':
                 atlasDirectory = os.path.join(master_config['atlascache'], 'spatialImages', 'rho.nii.gz')
             else:
                 atlasDirectory = os.path.join(master_config['previousresult'], subject, 'Atlas', 'AVG_rho.nii.gz')
+                atlasDirectory.append(os.path.join(master_config['previousresult'], subject, 'Atlas', 'AVG_template_headregion.nii.gz') )
 
             if os.path.exists(atlasDirectory):
                 print("LOOKING FOR DIRECTORY {0}".format(atlasDirectory))

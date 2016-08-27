@@ -17,7 +17,6 @@
  *
  *=========================================================================*/
 #include "LLSModel.h"
-#include <iostream>
 
 #include "BRAINSConstellationDetectorVersion.h"
 
@@ -419,7 +418,7 @@ LLSModel
 
 const LLSModel::LLSMeansType &
 LLSModel
-::GetLLSMeans()
+::GetLLSMeans() const
 {
   return this->m_LLSMeans;
 }
@@ -433,7 +432,7 @@ LLSModel
 
 const LLSModel::LLSMatricesType &
 LLSModel
-::GetLLSMatrices()
+::GetLLSMatrices() const
 {
   return this->m_LLSMatrices;
 }
@@ -447,7 +446,7 @@ LLSModel
 
 const LLSModel::LLSSearchRadiiType &
 LLSModel
-::GetSearchRadii()
+::GetSearchRadii() const
 {
   return m_LLSSearchRadii;
 }

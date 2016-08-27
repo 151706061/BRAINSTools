@@ -42,12 +42,9 @@
 #include "itkImageToImageFilter.h"
 #include "itkImage.h"
 
-#include "itkImageMaskSpatialObject.h"
+#include "BRAINSTypes.h"
 #include "itkLargestForegroundFilledMaskImageFilter.h"
 #include "itkCastImageFilter.h"
-
-typedef itk::SpatialObject<3>      SpatialObjectType;
-typedef SpatialObjectType::Pointer ImageMaskPointer;
 
 namespace itk
 {
@@ -178,8 +175,7 @@ protected:
   void GenerateData() ITK_OVERRIDE;
 
 private:
-  BRAINSROIAutoImageFilter(const Self &); // purposely not implemented
-  void operator=(const Self &);           // purposely not implemented
+  ITK_DISALLOW_COPY_AND_ASSIGN(BRAINSROIAutoImageFilter);
 
   double           m_OtsuPercentileThreshold;
   double           m_ThresholdCorrectionFactor;

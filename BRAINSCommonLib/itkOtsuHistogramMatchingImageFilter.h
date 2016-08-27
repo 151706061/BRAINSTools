@@ -38,6 +38,7 @@
 #include "itkImageToImageFilter.h"
 #include "itkHistogram.h"
 #include "BRAINSFitUtils.h"
+#include "BRAINSTypes.h"
 #include "vnl/vnl_matrix.h"
 
 namespace itk
@@ -112,8 +113,6 @@ public:
   /** Pixel related typedefs. */
   typedef typename InputImageType::PixelType  InputPixelType;
   typedef typename OutputImageType::PixelType OutputPixelType;
-
-  typedef itk::SpatialObject<3> SpatialObjectType;
 
   /** Histogram related typedefs. */
   typedef Statistics::Histogram<THistogramMeasurement> HistogramType;
@@ -210,8 +209,7 @@ protected:
                           const THistogramMeasurement maxValue);
 
 private:
-  OtsuHistogramMatchingImageFilter(const Self &); // purposely not implemented
-  void operator=(const Self &);                   // purposely not implemented
+  ITK_DISALLOW_COPY_AND_ASSIGN(OtsuHistogramMatchingImageFilter);
 
   unsigned long m_NumberOfHistogramLevels;
   unsigned long m_NumberOfMatchPoints;

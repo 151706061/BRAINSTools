@@ -39,6 +39,7 @@
 #include "itkArray.h"
 
 #include "BRAINSCommonLib.h"
+#include "BRAINSTypes.h"
 
 #include "BRAINSDemonWarpCommonLibWin32Header.h"
 #include "GenericTransformImage.h"
@@ -179,8 +180,7 @@ void ThirionFunction(const struct BRAINSDemonWarpAppParameters & command)
   typedef itk::Image<MaskPixelType, dims>                 MaskImageType;
   typedef itk::CastImageFilter<TRealImage, MaskImageType> CastImageFilter;
 
-  typedef itk::ImageMaskSpatialObject<dims>                           ImageMaskSpatialObjectType;
-  typedef itk::SpatialObject<3> SpatialObjectType;
+  typedef itk::ImageMaskSpatialObject<dims>               ImageMaskSpatialObjectType;
 
   //
   // If optional landmark files given, will use landmark registration to

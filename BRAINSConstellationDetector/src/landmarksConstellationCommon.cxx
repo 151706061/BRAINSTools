@@ -17,29 +17,20 @@
  *
  *=========================================================================*/
 /*
- * Author: Han J. Johnson, Wei Lu
+ * Author: Han J. Johnson, Wei Lu, Ali Ghayoor
  * at Psychiatry Imaging Lab,
  * University of Iowa Health Care 2010
  */
 
 #include "itkIO.h"
 #include <itkImageMomentsCalculator.h>
+#include "itkRecursiveGaussianImageFilter.h"
 
 #include "itkReflectiveCorrelationCenterToImageMetric.h"
 #include "landmarksConstellationCommon.h"
 #include "TrimForegroundInDirection.h"
 #include "itkOrthogonalize3DRotationMatrix.h"
 
-typedef itk::ImageMomentsCalculator<SImageType> momentsCalculatorType;
-
-// TODO:  This should really be a singleton.
-RandomGeneratorPointer _RandomGenerator;
-const unsigned int     MAX_ROTATIONS_TESTED = 90;
-const unsigned int     MAXITER = 5000;
-const unsigned int     DEL = 3;
-const unsigned int     YES = 1;
-const unsigned int     NO = 0;
-const unsigned int     SMAX = 50;
 namespace LMC
 {
 bool debug(false);
@@ -50,6 +41,52 @@ std::string globalResultsDir(".");       // A global variable to define where
                                          // output images are to be placed
 int globalImagedebugLevel(1000);         // A global variable to determine the
                                          // level of debugging to perform.
+
+typedef Rigid3DCenterReflectorFunctor< itk::PowellOptimizerv4<double> > reflectionFunctorType;
+
+typedef itk::RecursiveGaussianImageFilter<SImageType, SImageType>  GaussianFilterType;
+
+void DoMultiQualityReflection(SImageType::Pointer &image,
+                              RigidTransformType::Pointer &Tmsp,
+                              const int qualityLevel,
+                              const reflectionFunctorType::Pointer &reflectionFunctor)
+{
+  //itkUtil::WriteImage<SImageType>(image,"PRE_PYRAMID.nii.gz");
+  reflectionFunctor->InitializeImage(image);
+  PyramidFilterType::Pointer    MyPyramid = MakeThreeLevelPyramid(image.GetPointer() );
+
+  SImageType::Pointer EigthImage = MyPyramid->GetOutput(0);
+  SImageType::Pointer QuarterImage = MyPyramid->GetOutput(1);
+  SImageType::Pointer HalfImage = MyPyramid->GetOutput(2);
+
+  if( qualityLevel >= 0 )
+      {
+      std::cout << "Level 0 Quality Estimates" << std::endl;
+      reflectionFunctor->SetDownSampledReferenceImage(EigthImage);
+      reflectionFunctor->Initialize();
+      reflectionFunctor->Update();
+      }
+  if( qualityLevel >= 1 )
+      {
+      std::cout << "Level 1 Quality Estimates" << std::endl;
+      reflectionFunctor->SetDownSampledReferenceImage(QuarterImage);
+      reflectionFunctor->Update();
+      }
+  if( qualityLevel >= 2 )
+      {
+      std::cout << "Level 2 Quality Estimates" << std::endl;
+      reflectionFunctor->SetDownSampledReferenceImage(HalfImage);
+      reflectionFunctor->Update();
+      }
+  if( qualityLevel >= 3 )
+      {
+      std::cout << "Level 3 Quality Estimates" << std::endl;
+      reflectionFunctor->SetDownSampledReferenceImage(image);
+      reflectionFunctor->Update();
+      }
+  reflectionFunctor->SetDownSampledReferenceImage(image);
+  Tmsp = reflectionFunctor->GetTransformToMSP();
+}
 
 void ComputeMSP(SImageType::Pointer image,
                 RigidTransformType::Pointer & Tmsp,
@@ -71,86 +108,24 @@ void ComputeMSP(SImageType::Pointer image,
     }
   else
     {
-    // itkUtil::WriteImage<SImageType>(image,"PRE_PYRAMID.nii.gz");
-    PyramidFilterType::Pointer    MyPyramid = MakeThreeLevelPyramid(image.GetPointer() );
-    SImageType::Pointer           EigthImage = MyPyramid->GetOutput(0);
-    SImageType::Pointer           QuarterImage = MyPyramid->GetOutput(1);
-    SImageType::Pointer           HalfImage = MyPyramid->GetOutput(2);
-    typedef Rigid3DCenterReflectorFunctor< itk::PowellOptimizerv4<double> > reflectionFunctorType;
     reflectionFunctorType::Pointer reflectionFunctor = reflectionFunctorType::New();
-
     reflectionFunctor->SetCenterOfHeadMass(centerOfHeadMass);
-    reflectionFunctor->InitializeImage(image);
-    if( qualityLevel >= 0 )
-      {
-      std::cout << "Level 0 Quality Estimates" << std::endl;
-      reflectionFunctor->SetDownSampledReferenceImage(EigthImage);
-      reflectionFunctor->Initialize();
-      reflectionFunctor->Update();
-      }
-    if( qualityLevel >= 1 )
-      {
-      std::cout << "Level 1 Quality Estimates" << std::endl;
-      reflectionFunctor->SetDownSampledReferenceImage(QuarterImage);
-      reflectionFunctor->Update();
-      }
-    if( qualityLevel >= 2 )
-      {
-      std::cout << "Level 2 Quality Estimates" << std::endl;
-      reflectionFunctor->SetDownSampledReferenceImage(HalfImage);
-      reflectionFunctor->Update();
-      }
-    if( qualityLevel >= 3 )
-      {
-      std::cout << "Level 3 Quality Estimates" << std::endl;
-      reflectionFunctor->SetDownSampledReferenceImage(image);
-      reflectionFunctor->Update();
-      }
-    reflectionFunctor->SetDownSampledReferenceImage(image);
-    Tmsp = reflectionFunctor->GetTransformToMSP();
+
+    DoMultiQualityReflection(image, Tmsp, qualityLevel, reflectionFunctor);
+
     transformedImage = reflectionFunctor->GetMSPCenteredImage();
     cc = reflectionFunctor->GetCC();
     }
 }
 
-void ComputeMSP(SImageType::Pointer image, RigidTransformType::Pointer & Tmsp, const int qualityLevel)
+void ComputeMSP_Easy(SImageType::Pointer image,
+                     RigidTransformType::Pointer & Tmsp,
+                     const SImageType::PointType & centerOfHeadMass,
+                     const int qualityLevel)
 {
-  // itkUtil::WriteImage<SImageType>(image,"PRE_PYRAMID.nii.gz");
-  PyramidFilterType::Pointer    MyPyramid = MakeThreeLevelPyramid(image);
-  SImageType::Pointer           EigthImage = MyPyramid->GetOutput(0);
-  SImageType::Pointer           QuarterImage = MyPyramid->GetOutput(1);
-  SImageType::Pointer           HalfImage = MyPyramid->GetOutput(2);
-  typedef Rigid3DCenterReflectorFunctor< itk::PowellOptimizerv4<double> > reflectionFunctorType;
   reflectionFunctorType::Pointer reflectionFunctor = reflectionFunctorType::New();
-
-  reflectionFunctor->InitializeImage(image);
-  if( qualityLevel >= 0 )
-    {
-    std::cout << "Level 0 Quality Estimates" << std::endl;
-    reflectionFunctor->SetDownSampledReferenceImage(EigthImage);
-    reflectionFunctor->Initialize();
-    reflectionFunctor->Update();
-    }
-  if( qualityLevel >= 1 )
-    {
-    std::cout << "Level 1 Quality Estimates" << std::endl;
-    reflectionFunctor->SetDownSampledReferenceImage(QuarterImage);
-    reflectionFunctor->Update();
-    }
-  if( qualityLevel >= 2 )
-    {
-    std::cout << "Level 2 Quality Estimates" << std::endl;
-    reflectionFunctor->SetDownSampledReferenceImage(HalfImage);
-    reflectionFunctor->Update();
-    }
-  if( qualityLevel >= 3 )
-    {
-    std::cout << "Level 3 Quality Estimates" << std::endl;
-    reflectionFunctor->SetDownSampledReferenceImage(image);
-    reflectionFunctor->Update();
-    }
-  reflectionFunctor->SetDownSampledReferenceImage(image);
-  Tmsp = reflectionFunctor->GetTransformToMSP();
+  reflectionFunctor->SetCenterOfHeadMass(centerOfHeadMass);
+  DoMultiQualityReflection(image, Tmsp, qualityLevel, reflectionFunctor);
 }
 
 void CreatedebugPlaneImage(SImageType::Pointer referenceImage, const std::string & debugfilename)
@@ -274,119 +249,6 @@ SImageType::Pointer CreatedebugPlaneImage(SImageType::Pointer referenceImage,
   return RasterImage;
 }
 
-vnl_vector<double> convertToReadable(const vnl_vector<double> & input)
-{
-  vnl_vector<double> temp;
-  temp.set_size(3);
-  temp[0] = input[0] * 180.0 / vnl_math::pi;
-  temp[1] = input[1] * 180.0 / vnl_math::pi;
-  temp[2] = input[2];
-  return temp;
-}
-
-/** this conversion uses conventions as described on page:
- *   http://www.euclideanspace.com/maths/geometry/rotations/euler/index.htm
- *   Coordinate System: right hand
- *   Positive angle: right hand
- *   Order of euler angles: initialHeadingAngle first, then initialAttitudeAngle, then initialBankAngle
- *   matrix row column ordering:
- *   [m00 m01 m02]
- *   [m10 m11 m12]
- *   [m20 m21 m22]*/
-// With respect to an LPS system of the head,
-// initialHeadingAngle is where you are looking left to right, (Rotation of Z
-// axis)
-// attiude is where you are looking from floor to ceiling (Rotation of X axis)
-// initialBankAngle is how tilted your head is  (Rotation of Y axis)
-void ComputeEulerAnglesFromRotationMatrix(const itk::Matrix<double, 3, 3> &  m,
-                                          double & initialAttitudeAngle,
-                                          double & initialBankAngle,
-                                          double & initialHeadingAngle)
-{
-  // Assuming the angles are in radians.
-  if( m[1][0] > 0.998 )  // singularity at north pole
-    {
-    initialAttitudeAngle = 0;
-    initialBankAngle = std::atan2(m[0][2], m[2][2]);
-    initialHeadingAngle = vnl_math::pi_over_2;
-    return;
-    }
-  if( m[1][0] < -0.998 )  // singularity at south pole
-    {
-    initialAttitudeAngle = 0;
-    initialBankAngle = std::atan2(m[0][2], m[2][2]);
-    initialHeadingAngle = -vnl_math::pi_over_2;
-    return;
-    }
-  initialAttitudeAngle = std::atan2(-m[1][2], m[1][1]);
-  initialBankAngle = std::atan2(-m[2][0], m[0][0]);
-  initialHeadingAngle = std::asin(m[1][0]);
-}
-
-
-itk::Versor<double> CreateRotationVersorFromAngles(const double alpha, const double beta, const double gamma)
-{
-  // http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
-  // psi = alpha is rotate the X axis -- Attitude
-  // theta= beta is rotate the Y axis  -- Bank
-  // phi=  gamma is rotate the Z axis -- Heading
-  const double cha = std::cos(alpha * 0.5);
-  const double chb = std::cos(beta * 0.5);
-  const double chg = std::cos(gamma * 0.5);
-  const double sha = std::sin(alpha * 0.5);
-  const double shb = std::sin(beta * 0.5);
-  const double shg = std::sin(gamma * 0.5);
-
-  vnl_vector_fixed<double, 4> q;
-  q[0] = cha * chb * chg + sha * shb * shg;
-  q[1] = sha * chb * chg - cha * shb * shg;
-  q[2] = cha * shb * chg + sha * chb * shg;
-  q[3] = cha * chb * shg - sha * shb * chg;
-
-  itk::Versor<double> v;
-  v.Set(q[0], q[1], q[2], q[3]);
-  return v;
-}
-
-VersorTransformType::Pointer ConvertToVersorRigid3D(RigidTransformType::Pointer RT)
-{
-  VersorTransformType::Pointer VT = VersorTransformType::New();
-
-  VT->SetFixedParameters( RT->GetFixedParameters() );
-
-  itk::Matrix<double, 3, 3>           R = RT->GetMatrix();
-  RigidTransformType::TranslationType T = RT->GetTranslation();
-
-  VersorTransformType::ParametersType p;
-  p.SetSize(6);
-  itk::Versor<double> v;
-  v.Set(R);
-  // Get the first 3 elements of the versor;
-  p[0] = v.GetRight()[0];
-  p[1] = v.GetRight()[1];
-  p[2] = v.GetRight()[2];
-  p[3] = T[0];
-  p[4] = T[1];
-  p[5] = T[2];
-  VT->SetParameters(p);
-  return VT;
-}
-
-itk::Matrix<double, 3, 3> GetMatrixInverse(const itk::Matrix<double, 3, 3> & input)
-{
-  // Hack until enhancemetn fix in ITK is made public for assignment of matrix
-  itk::Matrix<double, 3, 3>::InternalMatrixType temp = input.GetInverse();
-  itk::Matrix<double, 3, 3>                     output;
-
-  for( unsigned int r = 0; r < 3; ++r )
-    {
-    for( unsigned int c = 0; c < 3; ++c )
-      {
-      output(r, c) = temp(r, c);
-      }
-    }
-  return output;
-}
 
 PyramidFilterType::Pointer MakeThreeLevelPyramid(SImageType::Pointer refImage)
 {
@@ -426,15 +288,12 @@ PyramidFilterType::Pointer MakeOneLevelPyramid(SImageType::Pointer refImage)
   MyPyramid->SetInput(refImage);
   MyPyramid->SetNumberOfLevels(1);
   pyramidSchedule.SetSize(1, 3);
-  // Attempt to set a schedule so that the top of the pyramid
-  // has images of about 8mm, and the next level has resolutions about 4mm
-  // isotropic voxels
-  // these are sizes found to work well for estimating MSP without making the
-  // image too small.
+
   SImageType::SpacingType refImageSpacing = refImage->GetSpacing();
   for( unsigned int c = 0; c < pyramidSchedule.cols(); ++c )
     {
-    pyramidSchedule[0][c] = static_cast<unsigned int>( std::floor(4.0 / refImageSpacing[c] + 0.5) );
+    // about 8mm
+    pyramidSchedule[0][c] = static_cast<unsigned int>( 2 * round(4.0 / refImageSpacing[c]) );
     }
   MyPyramid->SetSchedule(pyramidSchedule);
   MyPyramid->Update();
@@ -536,31 +395,6 @@ RigidTransformType::Pointer computeTmspFromPoints(
   return AlignMSPTransform;
 }
 
-// //
-//
-//
-// ////////////////////////////////////////////////////////////////////////////////////////////////
-int computeTemplateSize(const int r, const int h)
-{
-  const double h_2 = h / 2;
-  const double r2 = r * r;
-  int          size = 0;
-
-  for( double k = -r; k <= r; ++k )
-    {
-    for( double j = -r; j <= r; ++j )
-      {
-      for( double i = -h_2; i <= h_2; ++i )
-        {
-        if( ( i * i + j * j )  <= r2 )
-          {
-          ++size;
-          }
-        }
-      }
-    }
-  return size;
-}
 
 //
 //
@@ -571,7 +405,7 @@ int computeTemplateSize(const int r, const int h)
 void decomposeRPAC(const SImageType::PointType & RP,
                    const SImageType::PointType & PC,
                    const SImageType::PointType & AC,
-                   float *const RPPC_to_RPAC_angle, float *const RPAC_over_RPPC)
+                   double *const RPPC_to_RPAC_angle, double *const RPAC_over_RPPC)
 {
   const double RPtoPC = std::sqrt( ( ( RP[1] - PC[1] ) * ( RP[1] - PC[1] ) + ( RP[2] - PC[2] ) * ( RP[2] - PC[2] ) ) );
   const double RPtoAC = std::sqrt( ( ( RP[1] - AC[1] ) * ( RP[1] - AC[1] ) + ( RP[2] - AC[2] ) * ( RP[2] - AC[2] ) ) );
@@ -592,20 +426,6 @@ void decomposeRPAC(const SImageType::PointType & RP,
                                      // std::endl;
 }
 
-SImageType::PointType::VectorType initialAC(const SImageType::PointType & RP,  const SImageType::PointType & PC,
-                                            const double RPPC_to_RPAC_angleMean, const double RPAC_over_RPPCMean)
-{
-  const SImageType::PointType::VectorType RPPCVector = PC - RP;
-  SImageType::PointType::VectorType       GuessAC;
-
-  GuessAC[0] = ( RP[0] + RPPCVector[0] * .05 );
-  const double cos_gamma = std::cos(RPPC_to_RPAC_angleMean);
-  const double sin_gamma = std::sin(RPPC_to_RPAC_angleMean);
-  // First rotate the RPPC vector in the direction of the AC poinnt
-  GuessAC[1] = RP[1] + ( cos_gamma * RPPCVector[1] - sin_gamma * RPPCVector[2] ) * RPAC_over_RPPCMean;
-  GuessAC[2] = RP[2] + ( sin_gamma * RPPCVector[1] + cos_gamma * RPPCVector[2] ) * RPAC_over_RPPCMean;
-  return GuessAC;
-}
 
 void
 extractArray(LinearInterpolatorType::Pointer imInterp,
@@ -620,11 +440,11 @@ extractArray(LinearInterpolatorType::Pointer imInterp,
     const SImageType::PointType & point = CenterPoint + *it;
     if( imInterp->IsInsideBuffer(point) )
       {
-      result_array[q] = imInterp->Evaluate(point);
+      result_array[q] = static_cast<float>(imInterp->Evaluate(point));
       }
     else
       {
-      result_array[q] = 0.0;
+      result_array[q] = 0.0F;
       }
     }
 }
@@ -742,7 +562,125 @@ SImageType::Pointer MakeIsoTropicReferenceImage(void)
   // NOTE:  No need to allocate the image memory, it is just used as a template.
   return isotropicReferenceVolume;
 }
+#if 0 //RM
+static vnl_vector<double> convertToReadable(const vnl_vector<double> & input)
+{
+  vnl_vector<double> temp;
+  temp.set_size(3);
+  temp[0] = input[0] * 180.0 / vnl_math::pi;
+  temp[1] = input[1] * 180.0 / vnl_math::pi;
+  temp[2] = input[2];
+  return temp;
+}
+#endif
 
+#if 0 //RM
+/** this conversion uses conventions as described on page:
+ *   http://www.euclideanspace.com/maths/geometry/rotations/euler/index.htm
+ *   Coordinate System: right hand
+ *   Positive angle: right hand
+ *   Order of euler angles: initialHeadingAngle first, then initialAttitudeAngle, then initialBankAngle
+ *   matrix row column ordering:
+ *   [m00 m01 m02]
+ *   [m10 m11 m12]
+ *   [m20 m21 m22]*/
+// With respect to an LPS system of the head,
+// initialHeadingAngle is where you are looking left to right, (Rotation of Z
+// axis)
+// attiude is where you are looking from floor to ceiling (Rotation of X axis)
+// initialBankAngle is how tilted your head is  (Rotation of Y axis)
+void ComputeEulerAnglesFromRotationMatrix(const itk::Matrix<double, 3, 3> &  m,
+                                          double & initialAttitudeAngle,
+                                          double & initialBankAngle,
+                                          double & initialHeadingAngle)
+{
+  // Assuming the angles are in radians.
+  if( m[1][0] > 0.998 )  // singularity at north pole
+    {
+    initialAttitudeAngle = 0;
+    initialBankAngle = std::atan2(m[0][2], m[2][2]);
+    initialHeadingAngle = vnl_math::pi_over_2;
+    return;
+    }
+  if( m[1][0] < -0.998 )  // singularity at south pole
+    {
+    initialAttitudeAngle = 0;
+    initialBankAngle = std::atan2(m[0][2], m[2][2]);
+    initialHeadingAngle = -vnl_math::pi_over_2;
+    return;
+    }
+  initialAttitudeAngle = std::atan2(-m[1][2], m[1][1]);
+  initialBankAngle = std::atan2(-m[2][0], m[0][0]);
+  initialHeadingAngle = std::asin(m[1][0]);
+}
+
+
+itk::Versor<double> CreateRotationVersorFromAngles(const double alpha, const double beta, const double gamma)
+{
+  // http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+  // psi = alpha is rotate the X axis -- Attitude
+  // theta= beta is rotate the Y axis  -- Bank
+  // phi=  gamma is rotate the Z axis -- Heading
+  const double cha = std::cos(alpha * 0.5);
+  const double chb = std::cos(beta * 0.5);
+  const double chg = std::cos(gamma * 0.5);
+  const double sha = std::sin(alpha * 0.5);
+  const double shb = std::sin(beta * 0.5);
+  const double shg = std::sin(gamma * 0.5);
+
+  vnl_vector_fixed<double, 4> q;
+  q[0] = cha * chb * chg + sha * shb * shg;
+  q[1] = sha * chb * chg - cha * shb * shg;
+  q[2] = cha * shb * chg + sha * chb * shg;
+  q[3] = cha * chb * shg - sha * shb * chg;
+
+  itk::Versor<double> v;
+  v.Set(q[0], q[1], q[2], q[3]);
+  return v;
+}
+
+VersorTransformType::Pointer ConvertToVersorRigid3D(RigidTransformType::Pointer RT)
+{
+  VersorTransformType::Pointer VT = VersorTransformType::New();
+
+  VT->SetFixedParameters( RT->GetFixedParameters() );
+
+  itk::Matrix<double, 3, 3>           R = RT->GetMatrix();
+  RigidTransformType::TranslationType T = RT->GetTranslation();
+
+  VersorTransformType::ParametersType p;
+  p.SetSize(6);
+  itk::Versor<double> v;
+  v.Set(R);
+  // Get the first 3 elements of the versor;
+  p[0] = v.GetRight()[0];
+  p[1] = v.GetRight()[1];
+  p[2] = v.GetRight()[2];
+  p[3] = T[0];
+  p[4] = T[1];
+  p[5] = T[2];
+  VT->SetParameters(p);
+  return VT;
+}
+
+itk::Matrix<double, 3, 3> GetMatrixInverse(const itk::Matrix<double, 3, 3> & input)
+{
+  // Hack until enhancemetn fix in ITK is made public for assignment of matrix
+  itk::Matrix<double, 3, 3>::InternalMatrixType temp = input.GetInverse();
+  itk::Matrix<double, 3, 3>                     output;
+
+  for( unsigned int r = 0; r < 3; ++r )
+    {
+    for( unsigned int c = 0; c < 3; ++c )
+      {
+      output(r, c) = temp(r, c);
+      }
+    }
+  return output;
+}
+#endif
+
+#if 0 //RM
 template<class TScalarType>
 void WriteTransformToDisk( itk::Transform<TScalarType, 3, 3> * myTransform , const std::string & filename  )
 {
@@ -762,3 +700,49 @@ void WriteTransformToDisk( itk::Transform<TScalarType, 3, 3> * myTransform , con
 }
 
 template void WriteTransformToDisk<double>( itk::Transform<double, 3, 3> * myTransform , const std::string & filename );
+#endif
+
+#if 0 //RM
+// //
+//
+//
+// ////////////////////////////////////////////////////////////////////////////////////////////////
+int computeTemplateSize(const int r, const int h)
+{
+  const double h_2 = h / 2;
+  const double r2 = r * r;
+  int          size = 0;
+
+  for( double k = -r; k <= r; ++k )
+    {
+    for( double j = -r; j <= r; ++j )
+      {
+      for( double i = -h_2; i <= h_2; ++i )
+        {
+        if( ( i * i + j * j )  <= r2 )
+          {
+          ++size;
+          }
+        }
+      }
+    }
+  return size;
+}
+#endif
+
+#if 0 //RM
+SImageType::PointType::VectorType initialAC(const SImageType::PointType & RP,  const SImageType::PointType & PC,
+                                            const double RPPC_to_RPAC_angleMean, const double RPAC_over_RPPCMean)
+{
+  const SImageType::PointType::VectorType RPPCVector = PC - RP;
+  SImageType::PointType::VectorType       GuessAC;
+
+  GuessAC[0] = ( RP[0] + RPPCVector[0] * .05 );
+  const double cos_gamma = std::cos(RPPC_to_RPAC_angleMean);
+  const double sin_gamma = std::sin(RPPC_to_RPAC_angleMean);
+  // First rotate the RPPC vector in the direction of the AC poinnt
+  GuessAC[1] = RP[1] + ( cos_gamma * RPPCVector[1] - sin_gamma * RPPCVector[2] ) * RPAC_over_RPPCMean;
+  GuessAC[2] = RP[2] + ( sin_gamma * RPPCVector[1] + cos_gamma * RPPCVector[2] ) * RPAC_over_RPPCMean;
+  return GuessAC;
+}
+#endif

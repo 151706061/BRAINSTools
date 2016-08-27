@@ -2,14 +2,9 @@
 set(proj ITKv4)
 set(ITK_EXTERNAL_NAME ${proj})
 
-set(_require_vtk ${ITK_REQUIRES_VTK})
-if(${PRIMARY_PROJECT_NAME}_USE_QT ) ## If building with GUI, then need ITKVtkGlue
-  set(_require_vtk TRUE)
-endif()
-
 # Set dependency list
 set(${proj}_DEPENDENCIES "zlib")
-if(_require_vtk)
+if(${PRIMARY_PROJECT_NAME}_REQUIRES_VTK)
   list(APPEND ${proj}_DEPENDENCIES VTK)
 endif()
 #if(${CMAKE_PROJECT_NAME}_BUILD_DICOM_SUPPORT)
@@ -33,7 +28,7 @@ if(NOT DEFINED ITK_DIR AND NOT ${CMAKE_PROJECT_NAME}_USE_SYSTEM_${proj})
 
   set(ITK_VTK_OPTIONS )
 
-  if(_require_vtk)
+  if(${PRIMARY_PROJECT_NAME}_REQUIRES_VTK)
     list(APPEND ITK_VTK_OPTIONS
       -DModule_ITKVtkGlue:BOOL=ON
       -DVTK_DIR:PATH=${VTK_DIR}
@@ -45,7 +40,7 @@ if(NOT DEFINED ITK_DIR AND NOT ${CMAKE_PROJECT_NAME}_USE_SYSTEM_${proj})
   endif()
 
   set(${proj}_REPOSITORY ${git_protocol}://itk.org/ITK.git)
-  set(${proj}_GIT_TAG 5e64f6a178fc90f4e29536dd9e62fd71d28b510b ) # 20160314
+  set(${proj}_GIT_TAG 0cb4a4dea8070c8aff24e307eee104337a0783aa ) # 20160824
   set(EXTERNAL_PROJECT_OPTIONAL_CMAKE_CACHE_ARGS)
 
   if(NOT ${CMAKE_PROJECT_NAME}ITKV3_COMPATIBILITY AND CMAKE_CL_64)

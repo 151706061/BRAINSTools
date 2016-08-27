@@ -59,25 +59,26 @@ VersorTransformType::Pointer
 landmarksConstellationDetector::ComputeACPCAlignedZeroCenteredTransform(void)
 {
   SImageType::PointType ZeroCenter;
-
   ZeroCenter.Fill(0.0);
-  RigidTransformType::Pointer
-    landmarkDefinedACPCAlignedToZeroTransform =
+
+  RigidTransformType::Pointer landmarkDefinedACPCAlignedToZeroTransform =
     computeTmspFromPoints(GetNamedPointFromLandmarkList(this->GetOriginalSpaceNamedPoints(),"RP"),
-      GetNamedPointFromLandmarkList(this->GetOriginalSpaceNamedPoints(),"AC"),
-      GetNamedPointFromLandmarkList(this->GetOriginalSpaceNamedPoints(),"PC"),
-      ZeroCenter);
+                          GetNamedPointFromLandmarkList(this->GetOriginalSpaceNamedPoints(),"AC"),
+                          GetNamedPointFromLandmarkList(this->GetOriginalSpaceNamedPoints(),"PC"),
+                          ZeroCenter);
 
   VersorTransformType::Pointer ACPCAlignedZeroCenteredTransform = VersorTransformType::New();
   ACPCAlignedZeroCenteredTransform->SetFixedParameters( landmarkDefinedACPCAlignedToZeroTransform->GetFixedParameters() );
+
   itk::Versor<double>               versorRotation;
-  const itk::Matrix<double, 3, 3> & CleanedOrthogonalized = itk::Orthogonalize3DRotationMatrix( landmarkDefinedACPCAlignedToZeroTransform->GetMatrix() );
+  const itk::Matrix<double, 3, 3> & CleanedOrthogonalized =
+    itk::Orthogonalize3DRotationMatrix( landmarkDefinedACPCAlignedToZeroTransform->GetMatrix() );
   versorRotation.Set( CleanedOrthogonalized );
-  ACPCAlignedZeroCenteredTransform->SetRotation(versorRotation);
+
+  ACPCAlignedZeroCenteredTransform->SetRotation( versorRotation );
   ACPCAlignedZeroCenteredTransform->SetTranslation( landmarkDefinedACPCAlignedToZeroTransform->GetTranslation() );
   return ACPCAlignedZeroCenteredTransform;
 }
-
 
 void
 landmarksConstellationDetector::ComputeFinalRefinedACPCAlignedTransform(void)
@@ -149,10 +150,9 @@ landmarksConstellationDetector::ComputeFinalRefinedACPCAlignedTransform(void)
       }
     else
       {
-      std::cout << "Could not find " << fixedIt->first << " in originalSpaceLandmarksPreBRAINSFit " << std::endl;
-      std::cout << "MIS MATCHED MOVING AND FIXED LANDMARKS!" << std::endl;
-      exit(-1);
-      //TODO:  Throw exception
+      itkGenericExceptionMacro(<< "Could not find " << fixedIt->first
+                               << " in originalSpaceLandmarksPreBRAINSFit " << std::endl
+                               << "MIS MATCHED MOVING AND FIXED LANDMARKS!" << std::endl);
       }
     }
 
@@ -252,11 +252,9 @@ landmarksConstellationDetector::ComputeFinalRefinedACPCAlignedTransform(void)
   this->m_ImageOrigToACPCVersorTransform = itk::ComputeRigidTransformFromGeneric( brainsFitHelper->GetCurrentGenericTransform()->GetNthTransform(0).GetPointer() );
   if( this->m_ImageOrigToACPCVersorTransform.IsNull() )
     {
-    // Fail if something weird happens.  TODO: This should throw an exception.
-    std::cout << "this->m_ImageOrigToACPCVersorTransform is null. It means we're not registering to the atlas, after all."
-      << std::endl;
-    std::cout << "FAILIING" << std::endl;
-    exit(-1);
+    // Fail if something weird happens.
+    itkGenericExceptionMacro(<< "this->m_ImageOrigToACPCVersorTransform is null. "
+                             << "It means we're not registering to the atlas, after all." << std::endl);
     }
 
     {
@@ -632,10 +630,8 @@ landmarksConstellationDetector::EulerToVersorRigid( VersorTransformType::Pointer
     }
   else
     {
-    std::cout << "Error missing Pointer data, assigning "
-    << "Euler3DTransformPointer to VersorRigid3DTransformPointer."
-    << std::endl;
-    throw;
+    itkGenericExceptionMacro(<< "Error missing Pointer data, assigning "
+                             << "Euler3DTransformPointer to VersorRigid3DTransformPointer." << std::endl);
     }
 }
 
@@ -709,6 +705,7 @@ void landmarksConstellationDetector::Compute( void )
   double c_c = 0;
   ComputeMSP( this->m_VolumeRoughAlignedWithHoughEye, this->m_finalTmsp,
               this->m_VolumeMSP, this->m_CenterOfHeadMass, this->m_mspQualityLevel, c_c );
+#if 0
   /*
    * If the MSP estimation is not good enough (i.e. c_c < -0.64), we try to compute the MSP again
    * using the previous m_finalTmsp as an initial transform.
@@ -722,9 +719,9 @@ void landmarksConstellationDetector::Compute( void )
                 << "Repeat the Estimation Process up to " << maxNumberOfIterations
                 << " More Times to Find a Better Estimation..." << std::endl;
 
-      for (unsigned int i = 1; i<maxNumberOfIterations; i++)
+      for (unsigned int i = 0; i<maxNumberOfIterations; i++)
         {
-        std::cout << "\nTry " << i << "..." << std::endl;
+        std::cout << "\nTry " << i+1 << "..." << std::endl;
 
         // Rotate VolumeRoughAlignedWithHoughEye by finalTmsp again.
         SImageType::Pointer localRoughAlignedInput;
@@ -776,13 +773,24 @@ void landmarksConstellationDetector::Compute( void )
                                                                     minPixelValue,
                                                                     GetInterpolatorFromString<SImageType>("Linear").GetPointer(),
                                                                     this->GetTransformToMSP().GetPointer() );
+    }
+#endif
+  std::cout << "\n=============================================================" << std::endl;
 
-        std::cout << "\n=============================================================" << std::endl;
-        if( c_c > -0.7 )
-          {
-          std::cout << "Too large MSP estimation error at the final try!\n"
-          << "The estimation result is probably not reliable.\n" << std::endl;
-          }
+  // Generate a warning if reflective correlation similarity measure is low.
+  // It may be normal in some very diseased subjects, so don't throw an exception here.
+  if( c_c > -0.64 )
+    {
+    std::cout << "WARNING: Low reflective correlation between left/right hemispheres." << std::endl
+    << "The estimated landmarks may not be reliable.\n" << std::endl;
+    }
+
+  // Throw an exception and stop BCD if RC metric is too low (less than 0.4) because results will not be reliable.
+  if( c_c > -0.4 )
+    {
+    itkGenericExceptionMacro(<< "Too large MSP estimation error! reflective correlation metric is: "
+                             << c_c << std::endl
+                             << "Estimation of landmarks will not be reliable.\n" << std::endl);
     }
 
   // In case hough eye detector failed
@@ -863,6 +871,7 @@ void landmarksConstellationDetector::Compute( void )
       m_NamedPointEMSP["RE"] =
         InvFinalTmsp->TransformPoint( this->m_NamedPointEMSP["RE"] );
       }
+
     mspSpaceCEC.SetToMidPoint( this->m_NamedPointEMSP["LE"],
                                this->m_NamedPointEMSP["RE"] );
     mspSpaceCEC[0] = 0; // Search starts on the estimated MSP

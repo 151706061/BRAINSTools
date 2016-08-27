@@ -28,11 +28,19 @@ from builtins import object
 from configparser import ConfigParser
 import os
 import sys
+import copy
 
 from .pathHandling import *
 from .distributed import modify_qsub_args
 from . import misc
 
+# http://stackoverflow.com/questions/715417/converting-from-a-string-to-boolean-in-python
+def str2bool(v):
+  if str(v).lower() in ("yes", "true", "t", "1"):
+      return True
+  elif str(v).lower() in ("no", "false", "f", "0"):
+      return False
+  raise ValueError( "ERROR: INVALID String to bool conversion for '{0}'".format(v) )
 
 def parseEnvironment(parser, environment):
     """ Parse the environment environment given by 'section' and return a dictionary
@@ -116,11 +124,10 @@ def parseExperiment(parser, workflow_phase):
         previous = parser.get('EXPERIMENT', 'EXPERIMENT' + current_suffix + '_INPUT')
         retval['previousresult'] = create_experiment_dir(dirname, previous, 'Results', verify=True)
 
-    useRegistrationMasking = False
+    useRegistrationMasking = True
     try:
         regMasking = parser.get('EXPERIMENT', 'USE_REGISTRATION_MASKING')
-        if regMasking == "True":
-            useRegistrationMasking = True
+        useRegistrationMasking = str2bool(regMasking)
     except:
         pass
     retval['use_registration_masking'] = useRegistrationMasking
@@ -139,6 +146,9 @@ def parseExperiment(parser, workflow_phase):
             retval['jointfusion_atlas_db_base'] = validatePath(parser.get('EXPERIMENT', 'JointFusion_ATLAS_DB_BASE'),
                                                        allow_empty=False,
                                                        isDirectory=False)
+            retval['labelmap_colorlookup_table'] = validatePath(parser.get('EXPERIMENT', 'LABELMAP_COLORLOOKUP_TABLE'),
+                                                       allow_empty=False,
+                                                       isDirectory=False)
             retval['relabel2lobes_filename'] = validatePath(parser.get('EXPERIMENT', 'RELABEL2LOBES_FILENAME'),
                                                        allow_empty=True,
                                                        isDirectory=False)
@@ -150,6 +160,12 @@ def parseNIPYPE(parser):
     """ Parse the nipype section and return a dictionary """
     retval = dict()
     retval['ds_overwrite'] = parser.getboolean('NIPYPE', 'GLOBAL_DATA_SINK_REWRITE')
+
+    if parser.has_option('NIPYPE', 'CRASHDUMP_DIR'):
+        retval['CRASHDUMP_DIR'] = parser.get('NIPYPE', 'CRASHDUMP_DIR')
+    else:
+        retval['CRASHDUMP_DIR'] = None
+
     return retval
 
 
@@ -241,7 +257,7 @@ def _nipype_plugin_config(wfrun, cluster, template=''):
     return plugin_name, plugin_args
 
 
-def _nipype_execution_config(stop_on_first_crash=False, stop_on_first_rerun=False):
+def _nipype_execution_config(stop_on_first_crash=False, stop_on_first_rerun=False, crashdumpTempDirName=None):
     stop_crash = 'false'
     stop_rerun = 'false'
     if stop_on_first_crash:
@@ -250,8 +266,9 @@ def _nipype_execution_config(stop_on_first_crash=False, stop_on_first_rerun=Fals
         # This stops at first attempt to rerun, before running, and before deleting previous results
         stop_rerun = 'true'
 
-    import tempfile
-    crashdumpTempDirName=tempfile.gettempdir()
+    if crashdumpTempDirName is None:
+        import tempfile
+        crashdumpTempDirName=tempfile.gettempdir()
     print( "*** Note")
     print( "    Crash file will be written to '{0}'".format(crashdumpTempDirName))
     return {
@@ -262,7 +279,7 @@ def _nipype_execution_config(stop_on_first_crash=False, stop_on_first_rerun=Fals
         # default # relative paths should be on, require hash update when changed.
         'use_relative_paths': 'false',
         'remove_node_directories': 'false',  # default
-        'remove_unnecessary_outputs': 'false',
+        'remove_unnecessary_outputs': 'true', #remove any interface outputs not needed by the workflow
         'local_hash_check': 'true',          # default
         'job_finished_timeout': 25,
         'crashdump_dir':crashdumpTempDirName}
@@ -284,7 +301,7 @@ def nipype_options(args, pipeline, cluster, experiment, environment):
     # for key, value in kwds.items():
     #     retval['execution'][key] = value
     """
-    retval = {}
+    retval = copy.deepcopy(pipeline)
     from .distributed import create_global_sge_script
     template = create_global_sge_script(cluster, environment)
     #else:
@@ -292,8 +309,7 @@ def nipype_options(args, pipeline, cluster, experiment, environment):
     plugin_name, plugin_args = _nipype_plugin_config(args['--wfrun'], cluster, template)
     retval['plugin_name'] = plugin_name
     retval['plugin_args'] = plugin_args
-    retval['ds_overwrite'] = pipeline['ds_overwrite']  # resolveDataSinkOption(args, pipeline)
-    retval['execution'] = _nipype_execution_config(stop_on_first_crash=False, stop_on_first_rerun=False)
+    retval['execution'] = _nipype_execution_config(stop_on_first_crash=True, stop_on_first_rerun=False, crashdumpTempDirName=pipeline['CRASHDUMP_DIR'])
     retval['logging'] = _nipype_logging_config(experiment['cachedir'])
     return retval
 
